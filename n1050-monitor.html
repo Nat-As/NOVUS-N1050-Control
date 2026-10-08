@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>N1050 Monitor</title>
+<style>
+  :root {
+    --bg: #eef1f3;
+    --panel: #ffffff;
+    --ink: #1c2430;
+    --muted: #6f7a88;
+    --rule: #d8dee4;
+    --sp: #23875a;
+    --err: #c0392b;
+    --num: "Bahnschrift", "DIN Alternate", "Roboto Condensed", "Arial Narrow", ui-sans-serif, sans-serif;
+    --text: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color-scheme: light dark;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1f26;
+      --panel: #222831;
+      --ink: #e8edf2;
+      --muted: #8d97a5;
+      --rule: #343c47;
+      --sp: #5bd08a;
+      --err: #ff6b5b;
+    }
+  }
+  *, *::before, *::after { box-sizing: inherit; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.5 var(--text);
+  }
+  main { max-width: 1040px; margin: 0 auto; padding: 20px 20px 32px; }
+
+  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  h1 { font: 600 1.25rem/1 var(--num); letter-spacing: .02em; margin: 0; }
+  #status { color: var(--muted); font-size: .9rem; display: flex; align-items: center; gap: 8px; flex: 1; min-width: 200px; }
+  #status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--rule); flex: none; }
+  #status.ok::before { background: var(--sp); }
+  #status.bad { color: var(--err); }
+  #status.bad::before { background: var(--err); }
+
+  button {
+    font: 500 .9rem/1 var(--text);
+    padding: 10px 16px;
+    border-radius: 6px;
+    border: 1px solid var(--rule);
+    background: var(--panel);
+    color: var(--ink);
+    cursor: pointer;
+  }
+  button.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  button:disabled { opacity: .45; cursor: default; }
+  button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible { outline: 2px solid var(--sp); outline-offset: 2px; }
+
+  details { margin-top: 14px; }
+  summary { cursor: pointer; color: var(--muted); font-size: .9rem; width: max-content; }
+  .settings { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-top: 12px; }
+  .settings label { display: flex; flex-direction: column; gap: 4px; font-size: .8rem; color: var(--muted); }
+  select, input {
+    font: .95rem var(--text); color: var(--ink); background: var(--panel);
+    border: 1px solid var(--rule); border-radius: 6px; padding: 7px 8px;
+  }
+
+  .readout { margin: 28px 0 20px; }
+  .pv { display: flex; align-items: flex-start; gap: 6px; }
+  #pv {
+    font: 300 clamp(4.5rem, 17vw, 9.5rem)/0.9 var(--num);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+  #pv.err { color: var(--err); }
+  .pv .unit { font: 300 clamp(1.4rem, 4vw, 2.4rem)/1 var(--num); color: var(--muted); padding-top: .3em; }
+  .sub { display: flex; gap: 32px; flex-wrap: wrap; margin-top: 12px; align-items: baseline; }
+  .sub div { display: flex; align-items: baseline; gap: 8px; }
+  .sub .k { font-size: .85rem; color: var(--muted); }
+  #sp { font: 400 clamp(1.8rem, 5vw, 2.6rem)/1 var(--num); color: var(--sp); font-variant-numeric: tabular-nums; }
+  #mv { font: 400 1.3rem/1 var(--num); font-variant-numeric: tabular-nums; }
+  .spset { display: flex; gap: 8px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+  .spset label { font-size: .85rem; color: var(--muted); }
+  #spInput { width: 110px; font: 1.05rem var(--num); font-variant-numeric: tabular-nums; }
+
+  .chart { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 12px 12px 6px; }
+  .legend { display: flex; gap: 18px; font-size: .8rem; color: var(--muted); padding: 0 4px 6px; }
+  .legend span::before { content: ""; display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 6px; background: var(--ink); }
+  .legend .l-sp::before { background: var(--sp); }
+  canvas { display: block; width: 100%; height: clamp(240px, 42vh, 420px); }
+
+  footer { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+  #meta { flex: 1; color: var(--muted); font-size: .85rem; font-variant-numeric: tabular-nums; min-width: 200px; }
+
+  .notice { margin-top: 18px; padding: 12px 14px; border-left: 3px solid var(--err); background: var(--panel); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>N1050</h1>
+    <div id="status">Not connected</div>
+    <button id="connect" class="primary">Connect</button>
+  </header>
+
+  <div id="unsupported" class="notice" hidden>
+    This browser can't open serial ports. Use Chrome or Edge on a desktop computer.
+  </div>
+
+  <details id="settingsBox">
+    <summary>Connection settings</summary>
+    <div class="settings">
+      <label>Baud rate
+        <select id="baud">
+          <option>1200</option><option>2400</option><option>4800</option><option>9600</option>
+          <option>19200</option><option>38400</option><option>57600</option><option selected>115200</option>
+        </select>
+      </label>
+      <label>Parity
+        <select id="parity">
+          <option value="none" selected>None</option>
+          <option value="even">Even</option>
+          <option value="odd">Odd</option>
+        </select>
+      </label>
+      <label>Controller address
+        <input id="addr" type="number" min="1" max="247" value="1">
+      </label>
+      <label>Read every (s)
+        <input id="interval" type="number" min="0.2" max="60" step="0.1" value="1">
+      </label>
+      <label>Unit shown
+        <select id="unit">
+          <option value="°C" selected>°C</option>
+          <option value="°F">°F</option>
+        </select>
+      </label>
+      <label>Setpoint register in
+        <select id="spScale">
+          <option value="10" selected>Tenths of a degree</option>
+          <option value="1">Whole degrees</option>
+        </select>
+      </label>
+    </div>
+  </details>
+
+  <section class="readout" aria-live="polite">
+    <div class="pv">
+      <span id="pv">--.-</span><span class="unit" data-unit>°C</span>
+    </div>
+    <div class="sub">
+      <div><span class="k">Set</span><span id="sp">--.-</span><span class="k" data-unit>°C</span></div>
+      <div><span class="k">Output</span><span id="mv">--</span><span class="k">%</span></div>
+    </div>
+    <form class="spset" id="spForm" autocomplete="off">
+      <label for="spInput">New setpoint</label>
+      <input id="spInput" type="number" step="0.1" inputmode="decimal" disabled>
+      <span class="k" data-unit style="color:var(--muted);font-size:.85rem">°C</span>
+      <button id="spWrite" type="submit" disabled>Change setpoint</button>
+    </form>
+  </section>
+
+  <section class="chart">
+    <div class="legend"><span class="l-pv">Measured</span><span class="l-sp">Set</span></div>
+    <canvas id="chart"></canvas>
+  </section>
+
+  <footer>
+    <div id="meta">No data yet</div>
+    <button id="clear" disabled>Clear</button>
+    <button id="save" disabled>Save CSV</button>
+  </footer>
+</main>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const ui = {
+    status: $('status'), connect: $('connect'), pv: $('pv'), sp: $('sp'), mv: $('mv'),
+    meta: $('meta'), save: $('save'), clear: $('clear'), canvas: $('chart'),
+    baud: $('baud'), parity: $('parity'), addr: $('addr'), interval: $('interval'),
+    unit: $('unit'), spScale: $('spScale'),
+    spForm: $('spForm'), spInput: $('spInput'), spWrite: $('spWrite')
+  };
+
+  // ---------- State ----------
+  let port = null, reader = null, writer = null;
+  let keepReading = false, readLoopDone = null;
+  let connected = false, pollTimer = null, failCount = 0;
+  let rx = [];
+  let data = [];          // {t, pv, sp, mv}
+  let t0 = null;          // timestamp of initial connection
+  let savedCount = 0;
+
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  // ---------- Modbus RTU ----------
+  function crc16(bytes) {
+    let crc = 0xFFFF;
+    for (const b of bytes) {
+      crc ^= b;
+      for (let i = 0; i < 8; i++) crc = (crc & 1) ? (crc >>> 1) ^ 0xA001 : crc >>> 1;
+    }
+    return crc;
+  }
+  const int16 = (hi, lo) => { const v = (hi << 8) | lo; return v & 0x8000 ? v - 0x10000 : v; };
+
+  class ModbusError extends Error {
+    constructor(code) { super(`Modbus exception ${code}`); this.code = code; }
+  }
+
+  // One request on the wire at a time: polling and writes share this queue.
+  let busy = Promise.resolve();
+  function exclusive(fn) {
+    const p = busy.then(fn, fn);
+    busy = p.catch(() => {});
+    return p;
+  }
+
+  async function transact(frame, expected) {
+    const c = crc16(frame);
+    frame = [...frame, c & 0xFF, c >> 8];
+    rx = [];
+    await writer.write(new Uint8Array(frame));
+
+    const fc = frame[1];
+    const deadline = Date.now() + 500 + Math.ceil((expected + frame.length) * 11 * 1000 / Number(ui.baud.value));
+    while (Date.now() < deadline) {
+      if (rx.length >= 5 && rx[1] === (fc | 0x80)) throw new ModbusError(rx[2]);
+      if (rx.length >= expected) break;
+      await sleep(10);
+    }
+    if (rx.length < expected) throw new Error('timeout');
+
+    const f = rx.slice(0, expected);
+    const crc = crc16(f.slice(0, expected - 2));
+    if (f[expected - 2] !== (crc & 0xFF) || f[expected - 1] !== (crc >> 8)) throw new Error('crc');
+    if (f[0] !== frame[0] || f[1] !== fc) throw new Error('crc');
+    return f;
+  }
+
+  async function readHolding(slave, start, qty) {
+    const f = await transact([slave, 0x03, start >> 8, start & 0xFF, qty >> 8, qty & 0xFF], 5 + 2 * qty);
+    if (f[2] !== 2 * qty) throw new Error('crc');
+    const regs = [];
+    for (let i = 0; i < qty; i++) regs.push(int16(f[3 + 2 * i], f[4 + 2 * i]));
+    return regs;
+  }
+
+  async function writeSingle(slave, reg, value) {
+    const v = value & 0xFFFF;
+    const req = [slave, 0x06, reg >> 8, reg & 0xFF, v >> 8, v & 0xFF];
+    const f = await transact(req, 8); // reply echoes the request
+    for (let i = 0; i < 6; i++) if (f[i] !== req[i]) throw new Error('crc');
+  }
+
+  function describeError(e) {
+    if (e instanceof ModbusError) {
+      if (e.code === 2) return 'The controller does not accept that register (Modbus exception 2).';
+      if (e.code === 3) return 'The controller refused the value (Modbus exception 3). It may be outside the SP.LL to SP.HL limits.';
+      return `The controller rejected the request (Modbus exception ${e.code}).`;
+    }
+    if (e.message === 'timeout') return `No reply from address ${ui.addr.value}. Check the baud rate, parity and address match the controller.`;
+    if (e.message === 'crc') return 'Garbled reply. Check the baud rate and parity, and the RS-485 wiring.';
+    return e.message;
+  }
+
+  async function writeSetpoint(ev) {
+    ev.preventDefault();
+    if (!connected) return;
+    const val = parseFloat(ui.spInput.value);
+    if (!Number.isFinite(val)) { setStatus('Enter a setpoint value first.', 'bad'); ui.spInput.focus(); return; }
+    const raw = Math.round(val * Number(ui.spScale.value));
+    if (raw < -32768 || raw > 32767) { setStatus('That setpoint is out of range.', 'bad'); return; }
+    ui.spWrite.disabled = true;
+    try {
+      // Register 0000: write goes to the main SP
+      await exclusive(() => writeSingle(Number(ui.addr.value), 0x0000, raw));
+      const shown = (raw / Number(ui.spScale.value)).toFixed(ui.spScale.value === '10' ? 1 : 0);
+      setStatus(`Setpoint changed to ${shown} ${ui.unit.value}`, 'ok');
+      spStatusHold = Date.now() + 3000;
+    } catch (e) {
+      setStatus(describeError(e), 'bad');
+      spStatusHold = Date.now() + 6000;
+    } finally {
+      ui.spWrite.disabled = !connected;
+    }
+  }
+  let spStatusHold = 0;
+
+  // ---------- Serial ----------
+  async function readLoop() {
+    while (port && port.readable && keepReading) {
+      reader = port.readable.getReader();
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value) for (const b of value) rx.push(b);
+        }
+      } catch (e) {
+        // Framing/parity errors are recoverable; the loop gets a fresh reader.
+      } finally {
+        reader.releaseLock();
+        reader = null;
+      }
+    }
+  }
+
+  async function connect() {
+    const addr = Number(ui.addr.value);
+    if (!(addr >= 1 && addr <= 247)) { setStatus('Controller address must be between 1 and 247.', 'bad'); return; }
+    try {
+      port = await navigator.serial.requestPort();
+    } catch (e) {
+      return; // user closed the picker
+    }
+    try {
+      await port.open({
+        baudRate: Number(ui.baud.value), dataBits: 8, stopBits: 1,
+        parity: ui.parity.value, bufferSize: 256
+      });
+    } catch (e) {
+      port = null;
+      setStatus('Could not open the port. Close NConfig or any other program using it and try again.', 'bad');
+      return;
+    }
+    writer = port.writable.getWriter();
+    keepReading = true;
+    readLoopDone = readLoop();
+    if (!t0) t0 = Date.now();
+    connected = true;
+    failCount = 0;
+    setStatus('Connecting…');
+    updateControls();
+    poll();
+  }
+
+  async function disconnect(message = 'Not connected') {
+    connected = false;
+    clearTimeout(pollTimer);
+    keepReading = false;
+    try { if (reader) await reader.cancel(); } catch (e) {}
+    try { await readLoopDone; } catch (e) {}
+    try { if (writer) writer.releaseLock(); } catch (e) {}
+    try { if (port) await port.close(); } catch (e) {}
+    port = null; writer = null;
+    setStatus(message, message === 'Not connected' ? '' : 'bad');
+    updateControls();
+  }
+
+  if ('serial' in navigator) {
+    navigator.serial.addEventListener('disconnect', e => {
+      if (port && e.target === port) disconnect('The serial device was unplugged.');
+    });
+  }
+
+  // ---------- Polling ----------
+  async function poll() {
+    if (!connected) return;
+    const started = performance.now();
+    const intervalMs = Math.max(200, Number(ui.interval.value) * 1000 || 1000);
+    try {
+      // 0000 = active SP, 0001 = PV (×10), 0002 = MV (0–1000)
+      const [spRaw, pvRaw, mvRaw] = await exclusive(() => readHolding(Number(ui.addr.value), 0x0000, 3));
+      const sensorFault = pvRaw >= 32000 || pvRaw <= -32000;
+      const sample = {
+        t: Date.now(),
+        pv: sensorFault ? null : pvRaw / 10,
+        sp: spRaw / Number(ui.spScale.value),
+        mv: mvRaw / 10
+      };
+      data.push(sample);
+      failCount = 0;
+      showSample(sample, sensorFault);
+      if (Date.now() > spStatusHold) setStatus(sensorFault ? 'Connected. The controller reports a sensor fault.' : `Connected, reading every ${intervalMs / 1000} s`, sensorFault ? 'bad' : 'ok');
+      draw();
+      updateMeta();
+      updateControls();
+    } catch (e) {
+      if (!connected) return;
+      failCount++;
+      setStatus(describeError(e), 'bad');
+    }
+    if (connected) pollTimer = setTimeout(poll, Math.max(0, intervalMs - (performance.now() - started)));
+  }
+
+  // ---------- UI ----------
+  function setStatus(text, cls = '') {
+    ui.status.textContent = text;
+    ui.status.className = cls;
+  }
+
+  function showSample(s, fault) {
+    ui.pv.textContent = fault ? '----' : s.pv.toFixed(1);
+    ui.pv.classList.toggle('err', fault);
+    ui.sp.textContent = s.sp.toFixed(ui.spScale.value === '10' ? 1 : 0);
+    if (ui.spInput.value === '' && document.activeElement !== ui.spInput) ui.spInput.value = ui.sp.textContent;
+    ui.mv.textContent = s.mv.toFixed(1);
+  }
+
+  function updateControls() {
+    const supported = 'serial' in navigator;
+    ui.connect.disabled = !supported;
+    ui.connect.textContent = connected ? 'Disconnect' : 'Connect';
+    ui.connect.className = connected ? '' : 'primary';
+    [ui.baud, ui.parity, ui.addr, ui.spScale].forEach(el => el.disabled = connected);
+    ui.spInput.disabled = !connected;
+    ui.spWrite.disabled = !connected;
+    ui.spInput.step = ui.spScale.value === '10' ? '0.1' : '1';
+    ui.save.disabled = data.length === 0;
+    ui.clear.disabled = data.length === 0 && !t0;
+  }
+
+  function fmtElapsed(sec, long) {
+    sec = Math.max(0, Math.round(sec));
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+    const pad = n => String(n).padStart(2, '0');
+    return (long || h) ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+  }
+
+  function updateMeta() {
+    if (!t0) { ui.meta.textContent = 'No data yet'; return; }
+    const last = data.length ? data[data.length - 1].t : Date.now();
+    ui.meta.textContent =
+      `Started ${new Date(t0).toLocaleTimeString()}, ${fmtElapsed((last - t0) / 1000, true)} elapsed, ${data.length} readings`;
+  }
+
+  function applyUnit() {
+    document.querySelectorAll('[data-unit]').forEach(el => el.textContent = ui.unit.value);
+  }
+
+  // ---------- Chart ----------
+  function niceStep(raw) {
+    const p = Math.pow(10, Math.floor(Math.log10(raw)));
+    const n = raw / p;
+    return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p;
+  }
+  const timeSteps = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400];
+
+  function draw() {
+    const c = ui.canvas;
+    const dpr = window.devicePixelRatio || 1;
+    const W = c.clientWidth, H = c.clientHeight;
+    if (!W || !H) return;
+    c.width = Math.round(W * dpr); c.height = Math.round(H * dpr);
+    const ctx = c.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+
+    const css = getComputedStyle(document.documentElement);
+    const col = k => css.getPropertyValue(k).trim();
+    const ink = col('--ink'), muted = col('--muted'), rule = col('--rule'), spc = col('--sp');
+    ctx.font = `12px ${col('--text')}`;
+
+    if (!data.length) {
+      ctx.fillStyle = muted; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(t0 ? 'Waiting for the first reading' : 'Connect to the controller to start recording', W / 2, H / 2);
+      return;
+    }
+
+    const L = 52, R = 14, T = 10, B = 26;
+    const pw = W - L - R, ph = H - T - B;
+
+    let lo = Infinity, hi = -Infinity;
+    for (const d of data) {
+      if (d.pv != null) { lo = Math.min(lo, d.pv); hi = Math.max(hi, d.pv); }
+      lo = Math.min(lo, d.sp); hi = Math.max(hi, d.sp);
+    }
+    if (hi - lo < 2) { const m = (hi + lo) / 2; lo = m - 1; hi = m + 1; }
+    const padY = (hi - lo) * 0.08; lo -= padY; hi += padY;
+    const yStep = niceStep((hi - lo) / 5);
+    lo = Math.floor(lo / yStep) * yStep; hi = Math.ceil(hi / yStep) * yStep;
+
+    const tMax = Math.max(10, (data[data.length - 1].t - t0) / 1000);
+    const xs = t => L + ((t - t0) / 1000) / tMax * pw;
+    const ys = v => T + (1 - (v - lo) / (hi - lo)) * ph;
+
+    // grid + y labels
+    ctx.strokeStyle = rule; ctx.lineWidth = 1; ctx.fillStyle = muted;
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    const dec = yStep < 1 ? 1 : 0;
+    for (let v = lo; v <= hi + yStep / 2; v += yStep) {
+      const y = Math.round(ys(v)) + 0.5;
+      ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(W - R, y); ctx.stroke();
+      ctx.fillText(v.toFixed(dec), L - 8, y);
+    }
+
+    // x labels
+    const xStep = timeSteps.find(s => tMax / s <= 7) || 86400;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    for (let s = 0; s <= tMax + 1e-6; s += xStep) {
+      const x = L + s / tMax * pw;
+      ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, T + ph); ctx.lineTo(Math.round(x) + 0.5, T + ph + 4); ctx.stroke();
+      ctx.fillText(fmtElapsed(s, tMax >= 3600), x, T + ph + 8);
+    }
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(L, T - 2, pw, ph + 4); ctx.clip();
+    ctx.lineJoin = 'round';
+
+    // setpoint (stepped)
+    ctx.strokeStyle = spc; ctx.lineWidth = 1.5; ctx.beginPath();
+    data.forEach((d, i) => {
+      const x = xs(d.t), y = ys(d.sp);
+      if (i === 0) ctx.moveTo(x, y);
+      else { ctx.lineTo(x, ys(data[i - 1].sp)); ctx.lineTo(x, y); }
+    });
+    ctx.stroke();
+
+    // measured (gaps on sensor fault)
+    ctx.strokeStyle = ink; ctx.lineWidth = 2; ctx.beginPath();
+    let pen = false;
+    for (const d of data) {
+      if (d.pv == null) { pen = false; continue; }
+      const x = xs(d.t), y = ys(d.pv);
+      pen ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      pen = true;
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ---------- CSV ----------
+  function isoLocal(ms) {
+    const d = new Date(ms), pad = (n, w = 2) => String(n).padStart(w, '0');
+    const off = -d.getTimezoneOffset(), sign = off >= 0 ? '+' : '-';
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}` +
+      `${sign}${pad(Math.floor(Math.abs(off) / 60))}:${pad(Math.abs(off) % 60)}`;
+  }
+
+  function saveCsv() {
+    if (!data.length) return;
+    const u = ui.unit.value === '°F' ? 'F' : 'C';
+    const rows = [`timestamp,elapsed_s,measured_${u},setpoint_${u},output_pct`];
+    for (const d of data) {
+      rows.push([isoLocal(d.t), ((d.t - t0) / 1000).toFixed(3), d.pv == null ? '' : d.pv.toFixed(1), d.sp, d.mv.toFixed(1)].join(','));
+    }
+    const blob = new Blob([rows.join('\r\n') + '\r\n'], { type: 'text/csv' });
+    const a = document.createElement('a');
+    const st = isoLocal(t0).slice(0, 19).replace(/[-:]/g, '').replace('T', '-');
+    a.href = URL.createObjectURL(blob);
+    a.download = `n1050_${st}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    savedCount = data.length;
+  }
+
+  function clearData() {
+    if (data.length > savedCount && !confirm('Clear the recording? Unsaved readings will be lost.')) return;
+    data = []; savedCount = 0;
+    t0 = connected ? Date.now() : null;
+    ui.pv.textContent = '--.-'; ui.pv.classList.remove('err');
+    ui.sp.textContent = '--.-'; ui.mv.textContent = '--';
+    updateMeta(); updateControls(); draw();
+  }
+
+  // ---------- Wiring ----------
+  ui.connect.addEventListener('click', () => connected ? disconnect() : connect());
+  ui.save.addEventListener('click', saveCsv);
+  ui.clear.addEventListener('click', clearData);
+  ui.spForm.addEventListener('submit', writeSetpoint);
+  ui.unit.addEventListener('change', applyUnit);
+  new ResizeObserver(draw).observe(ui.canvas);
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw);
+  window.addEventListener('beforeunload', e => {
+    if (data.length > savedCount) { e.preventDefault(); e.returnValue = ''; }
+  });
+
+  if (!('serial' in navigator)) $('unsupported').hidden = false;
+  applyUnit();
+  updateControls();
+  draw();
+})();
+</script>
+</body>
+</html>
