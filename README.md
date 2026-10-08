@@ -1,4 +1,6 @@
 ![Build Status](https://img.shields.io/badge/build-passing-brightgreen)
+[![License](https://img.shields.io/github/license/Nat-As/NOVUS-N1050-Control)](https://github.com/Nat-As/NOVUS-N1050-Control/blob/main/LICENSE)
+![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/Nat-As/NOVUS-N1050-Control/total)
 
 ![Screenshot](/screenshot.png)
 
